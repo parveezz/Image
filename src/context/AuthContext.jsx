@@ -1,44 +1,74 @@
+
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
+
 import authService from "@/services/authService";
 
-const AuthContext = createContext({
-  user: null,
-  loading: true,
-  isAuthenticated: false,
-  login: async () => {},
-  logout: async () => {},
-  refreshUser: async () => {},
-});
+/**
+ * Authentication Context
+ */
+const AuthContext = createContext(null);
 
+/**
+ * Extract user from backend response.
+ */
+function extractUser(response) {
+  return (
+    response?.user ||
+    response?.admin ||
+    null
+  );
+}
+
+/**
+ * Global Authentication Provider.
+ */
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  /**
+   * Fetch current authenticated session.
+   */
   const fetchSession = useCallback(async () => {
+    setLoading(true);
+
     try {
       const response = await authService.getMe();
-      const userData = response?.user || response?.admin || response || null;
+
+      const userData = extractUser(response);
+
       setUser(userData);
+
       return userData;
-    } catch {
+    } catch (error) {
       setUser(null);
+
       return null;
     } finally {
       setLoading(false);
     }
   }, []);
 
+  /**
+   * Initialize authentication on application mount.
+   */
   useEffect(() => {
     let ignore = false;
 
-    async function initAuth() {
+    async function initializeAuth() {
       try {
         const response = await authService.getMe();
+
         if (!ignore) {
-          const userData = response?.user || response?.admin || response || null;
-          setUser(userData);
+          setUser(extractUser(response));
         }
       } catch {
         if (!ignore) {
@@ -51,38 +81,66 @@ export function AuthProvider({ children }) {
       }
     }
 
-    initAuth();
+    initializeAuth();
 
     return () => {
       ignore = true;
     };
   }, []);
 
+  /**
+   * Login user.
+   */
   const login = async (credentials) => {
-    const loginResponse = await authService.login(credentials);
+    setLoading(true);
+
     try {
-      const meResponse = await authService.getMe();
-      const userData = meResponse?.user || meResponse?.admin || meResponse || loginResponse?.user || null;
-      setUser(userData);
-      return loginResponse;
-    } catch {
-      if (loginResponse?.user) {
-        setUser(loginResponse.user);
+      const loginResponse = await authService.login(credentials);
+
+      try {
+        const meResponse = await authService.getMe();
+
+        const userData =
+          extractUser(meResponse) ||
+          extractUser(loginResponse);
+
+        setUser(userData);
+
+        return loginResponse;
+      } catch {
+        const userData = extractUser(loginResponse);
+
+        setUser(userData);
+
+        return loginResponse;
       }
-      return loginResponse;
+    } catch (error) {
+      setUser(null);
+      throw error;
+    } finally {
+      setLoading(false);
     }
   };
 
+  /**
+   * Logout user.
+   */
   const logout = async () => {
+    setLoading(true);
+
     try {
       await authService.logout();
-    } catch (err) {
-      console.warn("Logout request warning:", err);
+    } catch (error) {
+      console.warn("Logout request warning:", error);
     } finally {
       setUser(null);
+      setLoading(false);
     }
   };
 
+  /**
+   * Context values.
+   */
   const value = {
     user,
     loading,
@@ -92,14 +150,25 @@ export function AuthProvider({ children }) {
     refreshUser: fetchSession,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
+/**
+ * Authentication Hook.
+ */
 export function useAuth() {
   const context = useContext(AuthContext);
+
   if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error(
+      "useAuth must be used within an AuthProvider"
+    );
   }
+
   return context;
 }
 

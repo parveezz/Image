@@ -1,11 +1,13 @@
+
 /**
  * Next.js App Router robots.txt generator.
- * Automatically serves /robots.txt to define crawler crawl allowances and sitemap path.
+ * Controls crawler access and provides the sitemap location.
  */
+
 export default function robots() {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
-    "https://imagely.com";
+  const baseUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL || "https://imagely.com"
+  ).replace(/\/+$/, "");
 
   return {
     rules: [
@@ -13,8 +15,7 @@ export default function robots() {
         userAgent: "*",
         allow: "/",
         disallow: [
-          "/admin",
-          "/admin/*",
+          "/admin/",
           "/api/",
         ],
       },

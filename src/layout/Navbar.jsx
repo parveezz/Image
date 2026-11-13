@@ -4,9 +4,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
+import { useAppStore } from "@/store/useAppStore";
 
 const Navbar = () => {
       const [activeButton, setActiveButton] = useState(null);
+      const searchQuery = useAppStore((state) => state.searchQuery);
+      const setSearchQuery = useAppStore((state) => state.setSearchQuery);
 
       return (
             <header className="w-full border-b border-gray-200 bg-white">
@@ -33,6 +36,11 @@ const Navbar = () => {
                                     role="search"
                                     action="/search"
                                     method="GET"
+                                    onSubmit={(e) => {
+                                          if (!searchQuery.trim()) {
+                                                e.preventDefault();
+                                          }
+                                    }}
                                     className="flex w-[460px] items-center gap-2.5 rounded-md bg-gray-100 px-4 py-2 transition focus-within:ring-gray-300"
                               >
                                     <Search size={18} className="text-gray-500" aria-hidden="true" />
@@ -40,6 +48,8 @@ const Navbar = () => {
                                     <input
                                           type="search"
                                           name="q"
+                                          value={searchQuery}
+                                          onChange={(e) => setSearchQuery(e.target.value)}
                                           placeholder="Search for images, styles..."
                                           aria-label="Search images and styles"
                                           className="w-full rounded-md bg-transparent font-poppins text-sm text-gray-800 placeholder:text-gray-500 outline-none"

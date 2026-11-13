@@ -1,139 +1,272 @@
+
 import { api } from "@/lib/api";
 
 /**
- * Normalizes a page item from the backend into standard camelCase frontend structure.
+ * Extract backend data from an Axios response.
+ */
+function getResponseData(response) {
+  return response?.data ?? response;
+}
+
+/**
+ * Extract page object from common backend response formats.
+ */
+function getPageData(response) {
+  const data = getResponseData(response);
+
+  return data?.page ?? data?.data ?? data;
+}
+
+/**
+ * Normalize a page item from the backend into
+ * a standard camelCase frontend structure.
  */
 export function normalizePage(page) {
-  if (!page) return null;
-
-  // Capitalize status ("published" -> "Published", "draft" -> "Draft")
-  let formattedStatus = "Draft";
-  if (typeof page.status === "string" && page.status.trim()) {
-    const s = page.status.toLowerCase();
-    formattedStatus = s === "published" ? "Published" : "Draft";
+  if (!page || typeof page !== "object") {
+    return null;
   }
 
-  // Format timestamp for display
-  const rawDate = page.updated_at || page.updatedAt || page.created_at || page.createdAt;
+  // Normalize status.
+  const rawStatus =
+    typeof page.status === "string"
+      ? page.status.trim().toLowerCase()
+      : "";
+
+  const formattedStatus =
+    rawStatus === "published" ? "Published" : "Draft";
+
+  // Resolve timestamp.
+  const rawDate =
+    page.updated_at ||
+    page.updatedAt ||
+    page.created_at ||
+    page.createdAt;
+
   let formattedDate = "—";
+
   if (rawDate) {
-    try {
-      formattedDate = new Date(rawDate).toLocaleDateString("en-US", {
+    const date = new Date(rawDate);
+
+    if (!Number.isNaN(date.getTime())) {
+      formattedDate = date.toLocaleDateString("en-US", {
         year: "numeric",
         month: "short",
         day: "numeric",
       });
-    } catch {
-      formattedDate = String(rawDate);
     }
   }
+
+  const summary =
+    page.summary ||
+    page.meta_description ||
+    page.metaDescription ||
+    page.description ||
+    "";
 
   return {
     id: page.id,
     title: page.title || "",
     slug: page.slug || "",
-    summary: page.summary || page.meta_description || page.description || "",
-    description: page.summary || page.meta_description || page.description || "",
+    summary,
+    description: summary,
     content: page.content || "",
+
     status: formattedStatus,
-    // Database schema does not currently have category; provide graceful fallback
+
+    // Category is not currently available in the database schema.
     category: page.category || "General",
-    metaTitle: page.meta_title ?? page.metaTitle ?? page.title ?? "",
-    metaDescription: page.meta_description ?? page.metaDescription ?? page.summary ?? "",
-    canonicalUrl: page.canonical_url ?? page.canonicalUrl ?? "",
-    robotsIndex: page.robots_index ?? page.robotsIndex ?? true,
-    robotsFollow: page.robots_follow ?? page.robotsFollow ?? true,
+
+    metaTitle:
+      page.meta_title ??
+      page.metaTitle ??
+      page.title ??
+      "",
+
+    metaDescription:
+      page.meta_description ??
+      page.metaDescription ??
+      summary,
+
+    canonicalUrl:
+      page.canonical_url ??
+      page.canonicalUrl ??
+      "",
+
+    robotsIndex:
+      page.robots_index ??
+      page.robotsIndex ??
+      true,
+
+    robotsFollow:
+      page.robots_follow ??
+      page.robotsFollow ??
+      true,
+
     lastUpdated: formattedDate,
-    createdAt: page.created_at || page.createdAt || null,
-    updatedAt: page.updated_at || page.updatedAt || null,
+
+    createdAt:
+      page.created_at ??
+      page.createdAt ??
+      null,
+
+    updatedAt:
+      page.updated_at ??
+      page.updatedAt ??
+      null,
+
     _raw: page,
   };
 }
 
 /**
- * Maps frontend camelCase payload to backend PostgreSQL snake_case fields.
- * Note: Category is intentionally omitted as the DB schema does not have a category column.
+ * Convert frontend camelCase payload into backend
+ * PostgreSQL snake_case fields.
+ *
+ * Category is intentionally omitted because the
+ * current database schema does not support it.
  */
-export function toBackendPayload(payload) {
+export function toBackendPayload(payload = {}) {
   const result = {};
-  if (payload.title !== undefined) result.title = payload.title.trim();
-  if (payload.slug !== undefined) result.slug = payload.slug.trim();
-  if (payload.summary !== undefined) result.summary = payload.summary;
-  if (payload.content !== undefined) result.content = payload.content;
-  if (payload.status !== undefined) {
-    result.status = payload.status.toLowerCase();
+
+  if (payload.title !== undefined) {
+    result.title = String(payload.title).trim();
   }
-  if (payload.metaTitle !== undefined) result.meta_title = payload.metaTitle;
-  if (payload.metaDescription !== undefined) result.meta_description = payload.metaDescription;
-  if (payload.canonicalUrl !== undefined) result.canonical_url = payload.canonicalUrl;
-  if (payload.robotsIndex !== undefined) result.robots_index = Boolean(payload.robotsIndex);
-  if (payload.robotsFollow !== undefined) result.robots_follow = Boolean(payload.robotsFollow);
+
+  if (payload.slug !== undefined) {
+    result.slug = String(payload.slug).trim();
+  }
+
+  if (payload.summary !== undefined) {
+    result.summary = payload.summary;
+  }
+
+  if (payload.content !== undefined) {
+    result.content = payload.content;
+  }
+
+  if (payload.status !== undefined) {
+    if (typeof payload.status !== "string") {
+      throw new TypeError("Page status must be a string.");
+    }
+
+    result.status = payload.status.trim().toLowerCase();
+  }
+
+  if (payload.metaTitle !== undefined) {
+    result.meta_title = payload.metaTitle;
+  }
+
+  if (payload.metaDescription !== undefined) {
+    result.meta_description = payload.metaDescription;
+  }
+
+  if (payload.canonicalUrl !== undefined) {
+    result.canonical_url = payload.canonicalUrl;
+  }
+
+  if (payload.robotsIndex !== undefined) {
+    result.robots_index = Boolean(payload.robotsIndex);
+  }
+
+  if (payload.robotsFollow !== undefined) {
+    result.robots_follow = Boolean(payload.robotsFollow);
+  }
 
   return result;
 }
 
+/**
+ * Pages API service.
+ */
 export const pagesService = {
   /**
    * Retrieve paginated pages with optional search and status filter.
-   * Note: Category is NOT sent as the backend API does not support it.
    */
-  async getPages({ page = 1, limit = 10, search = "", status = "" } = {}) {
+  async getPages({
+    page = 1,
+    limit = 10,
+    search = "",
+    status = "",
+  } = {}) {
     const params = new URLSearchParams();
 
     if (page) params.set("page", String(page));
     if (limit) params.set("limit", String(limit));
-    if (search && search.trim()) params.set("search", search.trim());
-    if (status && status !== "all") params.set("status", status.toLowerCase());
+
+    if (search && search.trim()) {
+      params.set("search", search.trim());
+    }
+
+    if (status && status !== "all") {
+      params.set("status", status.toLowerCase());
+    }
 
     const queryString = params.toString();
-    const endpoint = `/api/pages${queryString ? `?${queryString}` : ""}`;
+
+    const endpoint = `/api/pages${queryString ? `?${queryString}` : ""
+      }`;
 
     const response = await api.get(endpoint);
+    const data = getResponseData(response);
 
-    // Normalize response formats:
-    // Case 1: { pages: [...], total: X, page: Y, limit: Z, totalPages: W }
-    // Case 2: { data: [...], pagination: { ... } }
-    // Case 3: Array of pages directly
     let rawList = [];
     let total = 0;
     let currentPage = Number(page) || 1;
     let currentLimit = Number(limit) || 10;
     let totalPages = 1;
 
-    if (Array.isArray(response)) {
-      rawList = response;
+    // Case 1: Backend returns an array directly.
+    if (Array.isArray(data)) {
+      rawList = data;
       total = rawList.length;
-      totalPages = Math.max(1, Math.ceil(total / currentLimit));
-    } else if (response && typeof response === "object") {
+
+      totalPages = Math.max(
+        1,
+        Math.ceil(total / currentLimit)
+      );
+    }
+
+    // Case 2: Backend returns an object.
+    else if (data && typeof data === "object") {
       rawList =
-        response.pages ||
-        response.data ||
-        (Array.isArray(response.items) ? response.items : []);
+        Array.isArray(data.pages)
+          ? data.pages
+          : Array.isArray(data.data)
+            ? data.data
+            : Array.isArray(data.items)
+              ? data.items
+              : [];
 
       total =
-        response.total ??
-        response.pagination?.total ??
-        response.count ??
+        data.total ??
+        data.pagination?.total ??
+        data.count ??
         rawList.length;
 
       currentPage =
-        response.page ??
-        response.pagination?.page ??
+        data.page ??
+        data.pagination?.page ??
         currentPage;
 
       currentLimit =
-        response.limit ??
-        response.pagination?.limit ??
+        data.limit ??
+        data.pagination?.limit ??
         currentLimit;
 
       totalPages =
-        response.totalPages ??
-        response.pagination?.totalPages ??
-        Math.max(1, Math.ceil(total / currentLimit));
+        data.totalPages ??
+        data.pagination?.totalPages ??
+        Math.max(
+          1,
+          Math.ceil(Number(total) / Number(currentLimit))
+        );
     }
 
     return {
-      pages: rawList.map(normalizePage),
+      pages: rawList
+        .map(normalizePage)
+        .filter(Boolean),
+
       total: Number(total) || 0,
       page: Number(currentPage) || 1,
       limit: Number(currentLimit) || 10,
@@ -142,12 +275,14 @@ export const pagesService = {
   },
 
   /**
-   * Retrieve a page by its database ID.
+   * Retrieve a page using its database ID.
    */
   async getPageById(id) {
-    const response = await api.get(`/api/pages/id/${id}`);
-    const pageData = response?.page || response?.data || response;
-    return normalizePage(pageData);
+    const response = await api.get(
+      `/api/pages/id/${encodeURIComponent(id)}`
+    );
+
+    return normalizePage(getPageData(response));
   },
 
   /**
@@ -155,34 +290,51 @@ export const pagesService = {
    */
   async createPage(payload) {
     const body = toBackendPayload(payload);
-    const response = await api.post("/api/pages", body);
-    return normalizePage(response?.page || response?.data || response);
+
+    const response = await api.post(
+      "/api/pages",
+      body
+    );
+
+    return normalizePage(getPageData(response));
   },
 
   /**
-   * Update an existing page by ID.
+   * Update an existing page.
    */
   async updatePage(id, payload) {
     const body = toBackendPayload(payload);
-    const response = await api.patch(`/api/pages/${id}`, body);
-    return normalizePage(response?.page || response?.data || response);
+
+    const response = await api.patch(
+      `/api/pages/${encodeURIComponent(id)}`,
+      body
+    );
+
+    return normalizePage(getPageData(response));
   },
 
   /**
-   * Delete a page by ID.
+   * Delete a page.
    */
   async deletePage(id) {
-    return await api.delete(`/api/pages/${id}`);
+    const response = await api.delete(
+      `/api/pages/${encodeURIComponent(id)}`
+    );
+
+    return getResponseData(response);
   },
 
   /**
-   * Public endpoint to fetch published page by slug.
-   * Explicitly omits credentials to ensure clean caching in Next.js Server Components.
+   * Public endpoint: retrieve a published page by slug.
+   *
+   * This request is intended for server-side public rendering.
    */
   async getPublicPageBySlug(slug) {
-    const response = await api.get(`/api/pages/slug/${slug}`, { credentials: "omit" });
-    const pageData = response?.page || response?.data || response;
-    return normalizePage(pageData);
+    const response = await api.get(
+      `/api/pages/slug/${encodeURIComponent(slug)}`
+    );
+
+    return normalizePage(getPageData(response));
   },
 };
 

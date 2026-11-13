@@ -1,62 +1,99 @@
-import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import { useEffect, useSyncExternalStore } from "react";
 
-const emptySubscribe = () => () => {};
+"use client";
+
+import { create } from "zustand";
+import {
+  persist,
+  createJSONStorage,
+} from "zustand/middleware";
+import { useEffect, useState } from "react";
 
 /**
  * Global Zustand Store for Imagely.
- * Manages theme, utility bar filters, active tabs, shuffle actions, and global search state.
+ *
+ * Manages:
+ * - Theme
+ * - Utility bar filters
+ * - Active tabs
+ * - Shuffle actions
+ * - Global search
  */
+
+let shuffleTimeout;
+
+/**
+ * Apply theme to the document.
+ */
+function applyTheme(dark) {
+  if (typeof document === "undefined") return;
+
+  document.documentElement.classList.toggle("dark", Boolean(dark));
+}
+
 export const useAppStore = create(
   persist(
     (set, get) => ({
       // 1. Theme State
       isDarkMode: false,
+
       toggleTheme: () => {
         const next = !get().isDarkMode;
+
         set({ isDarkMode: next });
-        if (typeof document !== "undefined") {
-          document.documentElement.classList.toggle("dark", next);
-        }
+        applyTheme(next);
       },
+
       setTheme: (dark) => {
         const next = Boolean(dark);
+
         set({ isDarkMode: next });
-        if (typeof document !== "undefined") {
-          document.documentElement.classList.toggle("dark", next);
-        }
+        applyTheme(next);
       },
 
       // 2. Utility Bar Filters & Navigation
       selectedPicType: "Pics",
-      setPicType: (picType) => set({ selectedPicType: picType }),
+
+      setPicType: (picType) =>
+        set({ selectedPicType: picType }),
 
       selectedCategory: "Category",
-      setCategory: (category) => set({ selectedCategory: category }),
+
+      setCategory: (category) =>
+        set({ selectedCategory: category }),
 
       activeTab: null,
+
       setActiveTab: (tabId) =>
         set((state) => ({
-          activeTab: state.activeTab === tabId ? null : tabId,
+          activeTab:
+            state.activeTab === tabId ? null : tabId,
         })),
 
       // 3. Global Shuffle Action
       isShuffling: false,
       shuffleCount: 0,
+
       triggerShuffle: () => {
+        if (shuffleTimeout) {
+          clearTimeout(shuffleTimeout);
+        }
+
         set((state) => ({
           isShuffling: true,
           shuffleCount: state.shuffleCount + 1,
         }));
-        setTimeout(() => {
+
+        shuffleTimeout = setTimeout(() => {
           set({ isShuffling: false });
+          shuffleTimeout = undefined;
         }, 600);
       },
 
       // 4. Search Query State
       searchQuery: "",
-      setSearchQuery: (query) => set({ searchQuery: query }),
+
+      setSearchQuery: (query) =>
+        set({ searchQuery: query }),
 
       // 5. Reset All Filters
       resetFilters: () =>
@@ -67,19 +104,25 @@ export const useAppStore = create(
           searchQuery: "",
         }),
     }),
+
     {
       name: "imagely_app_state",
-      storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? localStorage : undefined
-      ),
+
+      storage: createJSONStorage(() => localStorage),
+
+      // Only persist user preferences.
       partialize: (state) => ({
         isDarkMode: state.isDarkMode,
         selectedPicType: state.selectedPicType,
         selectedCategory: state.selectedCategory,
       }),
+
+      // Prevent automatic hydration during SSR.
+      skipHydration: true,
+
       onRehydrateStorage: () => (state) => {
-        if (state && typeof document !== "undefined") {
-          document.documentElement.classList.toggle("dark", Boolean(state.isDarkMode));
+        if (state) {
+          applyTheme(state.isDarkMode);
         }
       },
     }
@@ -87,19 +130,75 @@ export const useAppStore = create(
 );
 
 /**
- * Hook for consuming UtilityBar filter states and actions.
+ * Manually hydrate persisted Zustand state.
+ */
+export function useStoreHydration() {
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const hydrate = async () => {
+      await useAppStore.persist.rehydrate();
+
+      if (mounted) {
+        setIsHydrated(true);
+      }
+    };
+
+    hydrate();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return isHydrated;
+}
+
+/**
+ * Hook for UtilityBar filter states and actions.
  */
 export function useUtilityStore() {
-  const selectedPicType = useAppStore((state) => state.selectedPicType);
-  const setPicType = useAppStore((state) => state.setPicType);
-  const selectedCategory = useAppStore((state) => state.selectedCategory);
-  const setCategory = useAppStore((state) => state.setCategory);
-  const activeTab = useAppStore((state) => state.activeTab);
-  const setActiveTab = useAppStore((state) => state.setActiveTab);
-  const isShuffling = useAppStore((state) => state.isShuffling);
-  const shuffleCount = useAppStore((state) => state.shuffleCount);
-  const triggerShuffle = useAppStore((state) => state.triggerShuffle);
-  const resetFilters = useAppStore((state) => state.resetFilters);
+  const selectedPicType = useAppStore(
+    (state) => state.selectedPicType
+  );
+
+  const setPicType = useAppStore(
+    (state) => state.setPicType
+  );
+
+  const selectedCategory = useAppStore(
+    (state) => state.selectedCategory
+  );
+
+  const setCategory = useAppStore(
+    (state) => state.setCategory
+  );
+
+  const activeTab = useAppStore(
+    (state) => state.activeTab
+  );
+
+  const setActiveTab = useAppStore(
+    (state) => state.setActiveTab
+  );
+
+  const isShuffling = useAppStore(
+    (state) => state.isShuffling
+  );
+
+  const shuffleCount = useAppStore(
+    (state) => state.shuffleCount
+  );
+
+  const triggerShuffle = useAppStore(
+    (state) => state.triggerShuffle
+  );
+
+  const resetFilters = useAppStore(
+    (state) => state.resetFilters
+  );
 
   return {
     selectedPicType,
@@ -116,29 +215,33 @@ export function useUtilityStore() {
 }
 
 /**
- * Hydration-safe hook for consuming and toggling the Dark/Light theme.
+ * Hydration-safe theme hook.
  */
 export function useThemeStore() {
-  const isDarkMode = useAppStore((state) => state.isDarkMode);
-  const toggleTheme = useAppStore((state) => state.toggleTheme);
-  const setTheme = useAppStore((state) => state.setTheme);
-
-  const isClient = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
+  const isDarkMode = useAppStore(
+    (state) => state.isDarkMode
   );
 
+  const toggleTheme = useAppStore(
+    (state) => state.toggleTheme
+  );
+
+  const setTheme = useAppStore(
+    (state) => state.setTheme
+  );
+
+  const isMounted = useStoreHydration();
+
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.classList.toggle("dark", isDarkMode);
+    if (isMounted) {
+      applyTheme(isDarkMode);
     }
-  }, [isDarkMode]);
+  }, [isDarkMode, isMounted]);
 
   return {
-    isDarkMode: isClient ? isDarkMode : false,
+    isDarkMode: isMounted ? isDarkMode : false,
     toggleTheme,
     setTheme,
-    isMounted: isClient,
+    isMounted,
   };
 }
